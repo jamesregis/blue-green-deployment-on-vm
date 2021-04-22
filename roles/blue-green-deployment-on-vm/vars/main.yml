@@ -1,0 +1,43 @@
+registry_fqdn: "registry.home.lan"
+registry_username: 'username'
+registry_password: 'password'
+validate_registry_certs: true
+
+project_id: "myproject_1234"
+
+phase: "dev"
+
+container_name: "my-container"
+container_version: "latest"
+
+fqdns:
+  - "my-service.mydomain.com"
+  - "my-second-service.mydomain.com"
+
+memory_req: 150m
+cpu_req: 0.4
+
+container_exposed_port_blue:
+  - 8080:80
+  - 9090:9090
+
+container_exposed_port_green:
+  - 8081:80
+  - 9091:9090
+
+deployment_colors:
+  - 'blue'
+  - 'green'
+
+#fqdn_and_port:
+
+proxy_ip: "10.10.1.1"
+
+git_key: "my-gitlab.key"
+docker_json_file: "repository-access.json"
+certificate_manager: "my-cert-admin@example.com"
+
+localhost_path_to_test: ""
+
+# if the container has to start after another one
+# start_after=mariadb.service

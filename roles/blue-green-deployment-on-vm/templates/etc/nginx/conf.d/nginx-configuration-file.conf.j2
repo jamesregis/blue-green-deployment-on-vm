@@ -1,0 +1,35 @@
+{% for fqdn in fqdns %}
+server { 
+    server_name {{ fqdn }};
+   
+    access_log /var/log/nginx/{{ fqdn }}-access.log;
+    error_log /var/log/nginx/{{ fqdn }}-error.log;
+ 
+    location / {
+        # app1 reverse proxy follow
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host {{ fqdn  }};
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_pass http://{{ proxy_ip }}:{{ ports[loop.index-1].split(":")[0] }};
+    }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/{{ fqdn }}/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/{{ fqdn }}/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+}
+{% endfor %}
+{% for fqdn in fqdns %}
+server {
+    if ($host = {{ fqdn }}) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    server_name {{ fqdn }};
+    listen 80;
+    return 404; # managed by Certbot
+}
+{% endfor %}

@@ -1,0 +1,14 @@
+[Unit]
+Description={{ container_name }}-{{ phase }}-{{ current_deployment_color }} Podman container
+{% if start_after is defined %}
+After={{ start_after }}
+{% endif %}
+Wants=syslog.service
+
+[Service]
+Restart=always
+ExecStart=/usr/bin/podman start -a {{ container_name }}-{{ phase }}-{{ current_deployment_color }}
+ExecStop=/usr/bin/podman stop -t 10 {{ container_name }}-{{ phase }}-{{ current_deployment_color }}
+
+[Install]
+WantedBy=multi-user.target

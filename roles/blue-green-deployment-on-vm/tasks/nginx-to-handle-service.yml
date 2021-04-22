@@ -1,0 +1,40 @@
+---
+
+- name: Install software (nginx, certmanager, ...) from repository
+  become: true
+  yum:
+    name:
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+    state: present
+
+- name: Create certificates with letsencrypt
+  become: true
+  shell:
+    "/usr/bin/certbot certonly --nginx -d {{ cert_to_create }} --non-interactive --agree-tos -m {{ certificate_manager }}"
+  loop: "{{ fqdns }}"
+  loop_control:
+    loop_var: cert_to_create
+
+- name: Create *.conf file for freshly deployed application
+  become: true
+  template:
+    src: etc/nginx/conf.d/nginx-configuration-file.conf.j2
+    dest: "/etc/nginx/conf.d/{{ container_name }}-{{ phase }}.conf"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Check nginx configuration files
+  become: true
+  shell:
+     "/usr/sbin/nginx -t"
+  register: nginx_config_files_validation
+
+- name: Reload NGINX
+  become: true
+  systemd:
+    name: nginx
+    state: reloaded
+  when: nginx_config_files_validation.rc == 0

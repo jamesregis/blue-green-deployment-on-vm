@@ -1,0 +1,6 @@
+---
+
+- hosts: vm
+  gather_facts: true
+  roles:
+    - blue-green-deployment-on-vm

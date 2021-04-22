@@ -1,0 +1,194 @@
+---
+
+- name: Get last commit ID
+  set_fact:
+    last_commit: "{{ tower_webhook_payload.after }}"
+  when: phase == 'dev'
+
+- name: Get latest commit date
+  set_fact:
+    last_commit_tag: "{{ item.timestamp[:-6] | regex_replace(':', '-') }}"
+  loop: "{{ tower_webhook_payload.commits }}"
+  when: phase == 'dev' and item.id == last_commit
+
+- name: Set commit tag
+  set_fact:
+    container_version: "{{ last_commit_tag }}"
+  when: phase == 'dev'
+
+- name: Check if container is running on host
+  containers.podman.podman_container_info:
+    name: "{{ container_name }}-{{ item_color }}-{{ phase }}"
+  register: running_container
+  loop: "{{ deployment_colors }}"
+  loop_control:
+    loop_var: item_color
+  ## the loop will check for the green container and after 
+  ## for the blue cointainer.
+
+- set_fact:
+    green_is_running: true
+    blue_is_running: false
+  when: (running_container.results[0].containers == [] or running_container.results[0].containers[0].State.Running == false) and (running_container.results[1].containers != [] and running_container.results[1].containers[0].State.Running == true)
+
+- set_fact:
+    blue_is_running: true
+    green_is_running: false
+  when: (running_container.results[1].containers == [] or running_container.results[1].containers[0].State.Running == false) and (running_container.results[0].containers != [] and running_container.results[0].containers[0].State.Running == true)
+
+- set_fact:
+    blue_is_running: false
+    green_is_running: false
+  when: green_is_running is undefined and blue_is_running is undefined
+
+- debug: var=running_container.results[1].containers
+- debug: var=running_container.results[0].containers
+
+#- debug: var=running_container.results[0].containers
+#- debug: var=running_container.results[1].containers
+#
+#- debug: var=container_exposed_port[0].split(":")[0]
+#
+##- debug: var=running_container.containers[0]['HostConfig']['PortBindings']['80/tcp'][0]['HostPort']
+
+- name: Pull new image
+  containers.podman.podman_image:
+    name: "{{ registry_fqdn }}/{{ project_id }}/{{ container_path }}:{{ container_version }}"
+    username: "{{ registry_username }}"
+    password: "{{ registry_password }}"
+    validate_certs: "{{ validate_registry_certs }}"
+
+- set_fact:
+    current_deployment_color: 'green'
+    previous_deployment_color: 'blue'
+  when: blue_is_running == true and green_is_running == false
+
+- set_fact:
+    current_deployment_color: 'blue'
+    previous_deployment_color: 'green'
+  when: green_is_running == true and blue_is_running == false
+
+- set_fact:
+    current_deployment_color: 'green'
+    previous_deployment_color: 'blue'
+  when: green_is_running == false and blue_is_running == false
+
+- debug: var=current_deployment_color
+- debug: var=previous_deployment_color
+
+- name: "Remove previous {{ current_deployment_color }} container"
+  containers.podman.podman_container:
+    name: "{{ container_name }}-{{ current_deployment_color }}-{{ phase }}"
+    state: absent
+  when: green_is_running != false and blue_is_running != false
+
+- set_fact:
+    ports: "{{ container_exposed_port_blue }}"
+  when: current_deployment_color == 'blue'
+
+- set_fact:
+    ports: "{{ container_exposed_port_green }}"
+  when: current_deployment_color == 'green' or (green_is_running == false and blue_is_running == false)
+
+- debug: var=ports[0].split(":")[0]
+- debug: var=ports[1].split(":")[0]
+
+- name: Set container env vars
+  set_fact:
+    env_vars: "{{ dev_config }}"
+  when: phase == "dev"
+
+- name: Set container env vars
+  set_fact:
+    env_vars: "{{ prod_config }}"
+  when: phase == "prod"
+
+#- debug: var=phase
+#
+#- name: test
+#  pause:
+
+# - name: Show dictionary content
+#   debug:
+#     msg: "{{item.key}}: {{item.value}}"
+#   with_dict: "{{ env_vars }}"
+
+- name: "Deploy and start new {{ current_deployment_color }} container"
+  containers.podman.podman_container:
+    name: "{{ container_name }}-{{ current_deployment_color }}-{{ phase }}"
+    image: "{{ registry_fqdn }}/{{ project_id }}/{{ container_path }}:{{ container_version }}"
+    state: started
+    ports: "{{ ports }}"
+    #cpus: "{{ cpu_req }}"
+    #memory: "{{ memory_req }}"
+    env: "{{ env_vars }}"
+    #  SECRET_KEY: "ssssh"
+    #  BOOLEAN_KEY: "yes"
+
+- name: Wait (180 seconds) until the container is up and running before switching
+  uri:
+    url: "http://localhost:{{ ports[0].split(':')[0] }}{{ localhost_path_to_test }}"
+    return_content: yes
+    headers:
+      Accept-Language: 'en'
+  retries: 120
+  delay: 5
+  register: result
+  until: ('status' in result) and (result.status == 200 or result.status == 401)
+  changed_when: false
+
+- name: Add NGINX change to handle the service
+  include: nginx-to-handle-service.yml
+  delegate_to: "{{ proxy_ip }}"
+
+- name: "Create or update systemd init file for {{ current_deployment_color }} container"
+  become: true
+  template:
+    src: "etc/systemd/system/my-service.service.j2"
+    dest: "/etc/systemd/system/{{ container_name }}-{{ phase }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Reload systemd
+  become: true
+  systemd:
+    daemon_reload: yes
+
+- name: Enable on start
+  become: true
+  systemd:
+    name: "{{ container_name }}-{{ phase }}.service"
+    enabled: yes
+
+- name: Stop container if running
+  containers.podman.podman_container:
+    name: "{{ container_name }}-{{ previous_deployment_color }}-{{ phase }}"
+    state: stopped
+  when: running_container.results != []
+
+- debug: var=fqdns
+
+- name: Wait (600 seconds) until the webapp is up and running with ssl support
+  uri:
+    url: "https://{{ url }}"
+    return_content: yes
+    headers:
+      Accept-Language: 'en'
+  retries: 120
+  delay: 5
+  register: result
+  until: ('status' in result) and (result.status == 200 or result.status == 401)
+  changed_when: false
+  loop: "{{ url_for_testing }}"
+  loop_control:
+    loop_var: url
+
+- name: Remove previous image
+  shell:
+    "echo 'y' | podman image prune"
+
+#  containers.podman.podman_image:
+#    name: "{{ registry_fqdn }}/{{ project_id }}/{{ container_path }}:{{ container_version }}"
+#    state: absent
+#  when: running_container.results != []
