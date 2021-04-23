@@ -26,23 +26,26 @@
   ## the loop will check for the green container and after 
   ## for the blue cointainer.
 
-- set_fact:
+- name: Green pod is running
+  set_fact:
     green_is_running: true
     blue_is_running: false
-  when: (running_container.results[0].containers == [] or running_container.results[0].containers[0].State.Running == false) and (running_container.results[1].containers != [] and running_container.results[1].containers[0].State.Running == true)
+  when: (running_container.results[0].containers == [] or running_container.results[0].containers[0].State.Running) and (running_container.results[1].containers != [] and running_container.results[1].containers[0].State.Running)
 
-- set_fact:
+- name: Blue pod is running
+  set_fact:
     blue_is_running: true
     green_is_running: false
-  when: (running_container.results[1].containers == [] or running_container.results[1].containers[0].State.Running == false) and (running_container.results[0].containers != [] and running_container.results[0].containers[0].State.Running == true)
+  when: (running_container.results[1].containers == [] or not running_container.results[1].containers[0].State.Running) and (running_container.results[0].containers != [] and running_container.results[0].containers[0].State.Running)
 
-- set_fact:
+- name: No pods running
+  set_fact:
     blue_is_running: false
     green_is_running: false
   when: green_is_running is undefined and blue_is_running is undefined
 
-- debug: var=running_container.results[1].containers
-- debug: var=running_container.results[0].containers
+# - debug: var=running_container.results[1].containers
+# - debug: var=running_container.results[0].containers
 
 #- debug: var=running_container.results[0].containers
 #- debug: var=running_container.results[1].containers
@@ -58,40 +61,45 @@
     password: "{{ registry_password }}"
     validate_certs: "{{ validate_registry_certs }}"
 
-- set_fact:
+- name: Previous container was blue new on is green
+  set_fact:
     current_deployment_color: 'green'
     previous_deployment_color: 'blue'
-  when: blue_is_running == true and green_is_running == false
+  when: blue_is_running and not green_is_running
 
-- set_fact:
+- name: Previous container was green new on is blue
+  set_fact:
     current_deployment_color: 'blue'
     previous_deployment_color: 'green'
-  when: green_is_running == true and blue_is_running == false
+  when: green_is_running and not blue_is_running
 
-- set_fact:
+- name: No container was running -> deploy blue
+  set_fact:
     current_deployment_color: 'green'
     previous_deployment_color: 'blue'
-  when: green_is_running == false and blue_is_running == false
+  when: not green_is_running and not blue_is_running
 
-- debug: var=current_deployment_color
-- debug: var=previous_deployment_color
+# - debug: var=current_deployment_color
+# - debug: var=previous_deployment_color
 
 - name: "Remove previous {{ current_deployment_color }} container"
   containers.podman.podman_container:
     name: "{{ container_name }}-{{ current_deployment_color }}-{{ phase }}"
     state: absent
-  when: green_is_running != false and blue_is_running != false
+  when: green_is_running and blue_is_running
 
-- set_fact:
+- name: Blue container is running
+  set_fact:
     ports: "{{ container_exposed_port_blue }}"
   when: current_deployment_color == 'blue'
 
-- set_fact:
+- name: Green container is running
+  set_fact:
     ports: "{{ container_exposed_port_green }}"
-  when: current_deployment_color == 'green' or (green_is_running == false and blue_is_running == false)
+  when: current_deployment_color == 'green' or (not green_is_running and not blue_is_running)
 
-- debug: var=ports[0].split(":")[0]
-- debug: var=ports[1].split(":")[0]
+# - debug: var=ports[0].split(":")[0]
+# - debug: var=ports[1].split(":")[0]
 
 - name: Set container env vars
   set_fact:
@@ -167,7 +175,7 @@
     state: stopped
   when: running_container.results != []
 
-- debug: var=fqdns
+# - debug: var=fqdns
 
 - name: Wait (600 seconds) until the webapp is up and running with ssl support
   uri:
@@ -185,8 +193,8 @@
     loop_var: url
 
 - name: Remove previous image
-  shell:
-    "echo 'y' | podman image prune"
+  commad:
+    cmd: "echo 'y' | podman image prune"
 
 #  containers.podman.podman_image:
 #    name: "{{ registry_fqdn }}/{{ project_id }}/{{ container_path }}:{{ container_version }}"
