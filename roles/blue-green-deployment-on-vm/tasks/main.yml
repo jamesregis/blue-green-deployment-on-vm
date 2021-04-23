@@ -193,7 +193,7 @@
     loop_var: url
 
 - name: Remove previous image
-  commad:
+  command:
     cmd: "echo 'y' | podman image prune"
 
 #  containers.podman.podman_image:
